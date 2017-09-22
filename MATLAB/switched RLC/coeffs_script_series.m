@@ -1,0 +1,104 @@
+clear all
+close all
+
+Rs=50;
+RL=10;
+L=1e-6;
+C=22e-9;
+alpha=0.5; %duty cycle (less than 1)
+vs=1;
+w0=1/sqrt(L*C);
+wc=2*pi*100e3;
+tau = C/(1/Rs+1/RL);
+wd = sqrt(w0^2-(1/(2*tau))^2);
+
+T=1/(2e6);
+dt=T/100;
+
+%specify simulation time
+N=200;
+
+mon=floor(alpha*T/dt);
+moff=floor((1-alpha)*T/dt);
+m=mon+moff;
+
+t=0:dt:(N*m*dt);
+ton = dt*(0:(mon-1));
+toff = dt*(0:(moff-1));
+
+%particular (steady-state) solution coefficient
+
+temp = 1/((j*wc*C)*(RL+Rs+j*wc*L+1/(j*wc*C)));
+A=abs(temp);
+phi = angle(temp);
+
+i = zeros(size(t));
+vC = zeros(size(t));
+
+C1p=zeros(1,N);
+C2p=zeros(1,N);
+C1m=zeros(1,N);
+C2m=zeros(1,N);
+
+for n=1:N
+    %charging phase (+ state)
+    %set constants
+    if n==1 %assume initially iL=0 and v=0
+        C1p(n) = -A*vs*cos(phi);
+        C2p(n) = (1/wd)*(A*vs*cos(phi)/(2*tau)+wc*A*vs*sin(phi));
+    else
+        C1p(n) = vC((n-1)*m)-A*vs*cos(wc*(n-1)*T+phi);
+        C2p(n) = (1/wd)*(i((n-1)*m)/C-C1p(n)/(2*tau)+...
+                wc*A*vs*sin(wc*(n-1)*T+phi));
+    end
+    %fill iL and v for this "on" chunk of time
+    vC((1:mon)+(n-1)*m)=exp(-ton/(2*tau)).*(C1p(n)*cos(wd*ton)+C2p(n)*sin(wd*ton))...
+        +A*vs*cos(wc*t((1:mon)+(n-1)*m)+phi);
+    i((1:mon)+(n-1)*m)=-C*exp(-ton/(2*tau))/(2*tau).*(C1p(n)*cos(wd*ton)+C2p(n)*sin(wd*ton))+...
+        C*exp(-ton/(2*tau)).*(-wd*C1p(n)*sin(wd*ton)+wd*C2p(n)*cos(wd*ton))-...
+        C*wc*A*vs*sin(wc*t((1:mon)+(n-1)*m)+phi);
+    
+    %switch flips, changing the sign of Vs
+    
+    %discharging phase (- state)
+    %set constants
+    C1m(n) = vC((n-1)*m+mon)+A*vs*cos(wc*(n-1+alpha)*T+phi);
+    C2m(n) = (1/wd)*(i((n-1)*m+mon)/C-C1m(n)/(2*tau)-...
+        wc*A*vs*sin(wc*(n-1+alpha)*T+phi));
+    
+    vC((n-1)*m+mon+(1:moff))=exp(-toff/(2*tau)).*(C1m(n)*cos(wd*toff)+C2m(n)*sin(wd*toff))...
+        -A*vs*cos(wc*t((n-1)*m+mon+(1:moff))+phi);
+    i((n-1)*m+mon+(1:moff))=-C*exp(-toff/(2*tau))/(2*tau).*(C1m(n)*cos(wd*toff)+C2m(n)*sin(wd*toff))+...
+        C*exp(-toff/(2*tau)).*(-wd*C1m(n)*sin(wd*toff)+wd*C2m(n)*cos(wd*ton))+...
+        C*wc*A*vs*sin(wc*t((n-1)*m+mon+(1:moff))+phi);
+end
+
+figure
+plot(t, i)
+xlabel('Time (s)')
+ylabel('Current (A)')
+
+figure
+plot(t, vC)
+xlabel('Time (s)')
+ylabel('Capacitor Voltage (V)')
+
+figure
+plot(t, i.^2*RL)
+xlabel('Time (s)')
+ylabel('P_{rad} (W),')
+title(sprintf('switched P_{avg} = %.6f W, time-invariant P_{avg} = %.6f W', mean(i.^2*RL), 0.5*real((abs(vs/(RL+Rs+j*wc*L+1/(j*wc*C))).^2)/RL)))
+
+figure
+plot(((0:(length(i)-1))-floor(length(i)/2))/max(t), fftshift(abs(fft(i))))
+title('Spectrum')
+
+figure
+plot((1:N)*T, C1p, (1:N)*T, C2p)
+xlabel('Time (s)')
+ylabel('Solution constants (+ state)')
+
+figure
+plot((1:N)*T, C1m, (1:N)*T, C2m)
+xlabel('Time (s)')
+ylabel('Solution constants (- state)')
